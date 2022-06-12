@@ -59,12 +59,18 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
     acts = actions(p.pomdp, belief)
     num_a = length(acts)
     resize_ba!(D, D.ba + num_a)
-    resize_b!(D, D.b + m_max * num_a)
+    resize_b!(D, D.b + m_max * num_a + 1)
+
+    # `ba_weights` is an intermediate variable for marking inactive (terminal) particles
+    ba_weights = resize!(D.weights[D.b + m_max * num_a + 1], n_particles(belief))
+
     D.children[b] = (D.ba+1):(D.ba+num_a)
     for a in acts
         empty_buffer!(p)
-        S, O, R = propagate_particles(D, belief, a, p)
-        gen_packing!(D, O, belief, p)
+        ba_weights .= weights(belief)
+
+        S, O, R = propagate_particles!(D, belief, a, p, ba_weights)
+        gen_packing!(D, O, belief, p, ba_weights)
 
         D.ba += 1 # increase ba count
         n_obs = length(p.w) # number of new obs
@@ -76,6 +82,12 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
         D.ba_parent[D.ba] = b
         D.ba_r[D.ba] = R
         D.ba_action[D.ba] = a
+
+        if n_obs == 0
+            D.ba_l[D.ba] = D.ba_r[D.ba]
+            D.ba_l[D.ba] = D.ba_r[D.ba]
+            continue
+        end
 
         # initialize bounds
         D.b += n_obs
@@ -94,8 +106,8 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
         view(D.u, fbp:lbp) .= p.u
 
         # update upper and lower bounds for action selection
-        D.ba_l[D.ba] = D.ba_r[D.ba] + discount(p.pomdp) * sum(D.l[bp] * D.obs_prob[bp] for bp in D.ba_children[D.ba])
-        D.ba_u[D.ba] = D.ba_r[D.ba] + discount(p.pomdp) * sum(D.u[bp] * D.obs_prob[bp] for bp in D.ba_children[D.ba])
+        D.ba_l[D.ba] = D.ba_r[D.ba] + discount(p.pomdp) * sum((D.l[bp] * D.obs_prob[bp] for bp in D.ba_children[D.ba]), init=0.0)
+        D.ba_u[D.ba] = D.ba_r[D.ba] + discount(p.pomdp) * sum((D.u[bp] * D.obs_prob[bp] for bp in D.ba_children[D.ba]), init=0.0)
     end
     return maximum(D.ba_l[ba] for ba in D.children[b]) - D.l[b], maximum(D.ba_u[ba] for ba in D.children[b]) - D.u[b]
 end
@@ -104,8 +116,8 @@ function get_belief(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
     if b === 1
         return D.root_belief
     end
-    belief, w_sum = strip_terminals(WeightedParticleBelief(D.ba_particles[D.parent[b]], D.weights[b]), p.pomdp)
-    if w_sum != 0.0 && DesignEffect(D, b) > solver(p).Deff_thres
+    belief = WeightedParticleBelief(D.ba_particles[D.parent[b]], D.weights[b])
+    if DesignEffect(D, b) > solver(p).Deff_thres
         return resample!(belief, p)
     else
         return belief
@@ -194,12 +206,11 @@ function kld_resample!(b, p::AdaOPSPlanner)
     return p.resampled
 end
 
-function propagate_particles(D::AdaOPSTree, belief::WeightedParticleBelief, a, p::AdaOPSPlanner)
+function propagate_particles!(D::AdaOPSTree, belief::WeightedParticleBelief, a, p::AdaOPSPlanner, ba_weights::Vector{Float64})
     S = D.ba_particles[D.ba+1]
     O = p.obs
 
     Rsum = 0.0
-    k = 0 # number of multidimensional bins occupied
     for (i, s) in enumerate(particles(belief))
         w = weight(belief, i)
         if w == 0.0
@@ -207,31 +218,34 @@ function propagate_particles(D::AdaOPSTree, belief::WeightedParticleBelief, a, p
         else
             sp, o, r = @gen(:sp, :o, :r)(p.pomdp, s, a, p.rng)
             Rsum += w * r
-            p.obs_dists[i] = observation(p.pomdp, a, sp)
             push!(S, sp)
-            obs_ind = get(p.obs_ind_dict, o, 0)
-            if obs_ind !== 0
-                p.obs_w[obs_ind] += w
+            if isterminal(p.pomdp, sp)
+                ba_weights[i] = 0.0
             else
-                push!(p.obs_w, w)
-                push!(O, o)
-                p.obs_ind_dict[o] = length(O)
+                p.obs_dists[i] = observation(p.pomdp, a, sp)
+                obs_ind = get(p.obs_ind_dict, o, 0)
+                if obs_ind !== 0
+                    p.obs_w[obs_ind] += w
+                else
+                    push!(p.obs_w, w)
+                    push!(O, o)
+                    p.obs_ind_dict[o] = length(O)
+                end
             end
         end
     end
     return S, O, Rsum/weight_sum(belief)
 end
 
-function gen_packing!(D::AdaOPSTree, O, belief::WeightedParticleBelief, p::AdaOPSPlanner)
+function gen_packing!(D::AdaOPSTree, O, belief::WeightedParticleBelief, p::AdaOPSPlanner, ba_weights::Vector{Float64})
     sol = solver(p)
     m = n_particles(belief)
-    w = weights(belief)
 
     next_obs = 1 # denote the index of the next observation branch
     for i in eachindex(O)
         w′ = resize!(D.weights[D.b+next_obs], m)
         o = O[i]
-        reweight!(w′, w, o, p.obs_dists)
+        reweight!(w′, ba_weights, o, p.obs_dists)
         # check if the observation is already covered by the packing
         w′ .= w′ ./ sum(w′)
         obs_ind = in_packing(w′, p.w, sol.delta)
