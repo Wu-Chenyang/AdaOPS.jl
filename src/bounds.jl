@@ -3,9 +3,6 @@ function bounds_sanity_check(pomdp::P, b::WPFBelief{S}, L::Float64, U::Float64) 
         @warn(@sprintf("L (%-4.1f) > U (%-4.1f)", L, U))
         @info("Try e.g. `IndependentBounds(l, u, consistency_fix_thresh=1e-5)`.", maxlog=1)
     end
-    if (L != 0.0 || U != 0.0) && all(isterminal(pomdp, particle(b, i)) for i in 1:n_particles(b) if weight(b, i) > 0.0)
-        error(@sprintf("If all states are terminal, lower and upper bounds should be zero (L=%-4.1g, U=%-4.1g). (try IndependentBounds(l, u, check_terminal=true))", L, U))
-    end
     if isinf(L) || isnan(L)
         @warn(@sprintf("L = %-4.1f. Infinite bounds are not supported.", L))
     end
@@ -55,7 +52,7 @@ is implemented. Specifically, for FOValue, POValue, FORollout, SemiPORollout, an
 You can also implement a `bound!` function to initialize sibling beliefs simultaneously, if it could provide a further performace gain.
 
 # Keyword Arguments
-- `check_terminal::Bool=false`: if true, then if all the states in the belief are terminal, the upper and lower bounds will be overridden and set to 0.
+- `check_terminal::Bool=false`: if true, then if all the states in the belief are terminal, the upper and lower bounds will be overridden and set to 0. (deprecated option)
 - `consistency_fix_thresh::Float64=0.0`: if `upper < lower` and `upper >= lower-consistency_fix_thresh`, then `upper` will be bumped up to `lower`.
 """
 
@@ -73,6 +70,9 @@ function IndependentBounds(l, u;
 end
 
 function init_bounds(bds::IndependentBounds, pomdp::POMDP, sol::AdaOPSSolver, rng::AbstractRNG)
+    if bds.check_terminal
+        @warn("`check_terminal` is deprecated. It is assured that at least one state in the belief is not terminal.")
+    end
     return IndependentBounds(convert_estimator(bds.lower, sol, pomdp),
                              convert_estimator(bds.upper, sol, pomdp),
                              bds.check_terminal,
@@ -81,9 +81,6 @@ function init_bounds(bds::IndependentBounds, pomdp::POMDP, sol::AdaOPSSolver, rn
 end
 
 function bounds(bds::IndependentBounds, pomdp::P, b::WPFBelief{S,A,O}, max_depth::Int, bounds_warning::Bool) where {S,A,O,P<:POMDP{S,A,O}}
-    if bds.check_terminal && all(isterminal(pomdp, particle(b, i)) for i in 1:n_particles(b) if weight(b, i) > 0.0)
-        return (0.0, 0.0)
-    end
     l = bound(bds.lower, pomdp, b, max_depth)
     u = bound(bds.upper, pomdp, b, max_depth)
     if u < l && u >= l-bds.consistency_fix_thresh
@@ -98,15 +95,6 @@ end
 function bounds!(L::Vector{Float64}, U::Vector{Float64}, bds::IndependentBounds{LB,UB}, pomdp::P, b::WPFBelief{S,A,O}, W::Vector{Vector{Float64}}, obs::Vector{O}, max_depth::Int, bounds_warning::Bool) where {LB,UB,S,A,O,P<:POMDP{S,A,O}}
     bound!(L, bds.lower, pomdp, b, W, obs, max_depth)
     bound!(U, bds.upper, pomdp, b, W, obs, max_depth)
-    if bds.check_terminal
-        @inbounds for i in eachindex(W)
-            w = W[i]
-            if (L[i] != 0.0 || U[i] != 0.0) && all(isterminal(pomdp, particle(b, j)) for j in 1:n_particles(b) if w[j] > 0.0)
-                L[i] = 0.0
-                U[i] = 0.0
-            end
-        end
-    end
     @inbounds for i in eachindex(W)
         if U[i] < L[i] && U[i] >= L[i]-bds.consistency_fix_thresh
             U[i] = L[i]

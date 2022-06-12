@@ -60,7 +60,7 @@ function POMDPs.history(belief::WPFBelief{S,A,O}) where {S,A,O}
     return belief._hist
 end
 
-function resample!(resampled::WeightedParticleBelief, b::AbstractParticleBelief, pomdp::POMDP, rng::AbstractRNG)
+function resample!(resampled::WeightedParticleBelief, b::AbstractParticleBelief, rng::AbstractRNG)
     m = n_particles(resampled)
     step = weight_sum(b)/m
     U = rand(rng)*step

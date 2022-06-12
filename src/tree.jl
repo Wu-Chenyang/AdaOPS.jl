@@ -1,10 +1,6 @@
 function AdaOPSTree(p::AdaOPSPlanner{S,A,O}, b0::RB) where {S,A,O,RB}
     sol = solver(p)
-    b0, w_sum = strip_terminals(b0, p.pomdp)
-    if w_sum == 0.0
-        error("All states in the current belief are terminal.")
-    end
-    belief = resample!(b0, p)
+    belief = resample!(b0, p, true)
 
     if sol.tree_in_info || p.tree === nothing
         p.tree = AdaOPSTree([Float64[]],
@@ -118,28 +114,10 @@ function get_belief(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
     end
     belief = WeightedParticleBelief(D.ba_particles[D.parent[b]], D.weights[b])
     if DesignEffect(D, b) > solver(p).Deff_thres
-        return resample!(belief, p)
+        return resample!(belief, p, false)
     else
         return belief
     end
-end
-
-function strip_terminals(b, m::POMDP)
-    return b, 1.0
-end
-
-function strip_terminals(b::AbstractParticleBelief, m::POMDP)
-    w_sum = 0.0
-    P = particles(b)
-    W = weights(b)
-    @inbounds for (i, s) in enumerate(P)
-        if isterminal(m, s)
-            W[i] = 0.0
-        else
-            w_sum += W[i]
-        end
-    end
-    return WeightedParticleBelief(P, W, w_sum), w_sum
 end
 
 function DesignEffect(D::AdaOPSTree, b::Int)
@@ -159,28 +137,63 @@ function empty_buffer!(p::AdaOPSPlanner)
     return nothing
 end
 
-function resample!(b::B, p::AdaOPSPlanner{S,A,O,M,N}) where {B,S,A,O,M<:POMDP{S,A,O},N}
+function strip_terminals(b::AbstractParticleBelief, m::POMDP)
+    w_sum = 0.0
+    P = particles(b)
+    W = copy(weights(b))
+    @inbounds for (i, s) in enumerate(P)
+        if isterminal(m, s)
+            W[i] = 0.0
+        else
+            w_sum += W[i]
+        end
+    end
+    if w_sum == 0.0
+        error("All particles are terminal")
+    end
+    return WeightedParticleBelief(P, W, w_sum)
+end
+
+function resample!(b::AbstractParticleBelief, p::AdaOPSPlanner{S,A,O,M,N}, strip_terminal::Bool) where {S,A,O,M<:POMDP{S,A,O},N}
+    if strip_terminal
+        b = strip_terminals(b, p.pomdp)
+    end
     if N == 0
         # the number of resampled particles is default to p.sol.m_max
-        return resample!(p.resampled, b, p.pomdp, p.rng)
+        return resample!(p.resampled, b, p.rng)
     else
-        fill!(p.access_cnt, 0)
-        return kld_resample!(b, p)
+        return kld_resample!(b, p, strip_terminal)
+    end
+end
+
+function resample!(b::B, p::AdaOPSPlanner{S,A,O,M,N}, strip_terminal::Bool) where {B,S,A,O,M<:POMDP{S,A,O},N}
+    if N == 0
+        # the number of resampled particles is default to p.sol.m_max
+        if strip_terminal
+            return resample!(p.resampled, b, p.pomdp, p.rng)
+        else
+            p.resampled .= rand(p.rng, b, length(p.resampled))
+            return p.resampled
+        end
+    else
+        return kld_resample!(b, p, strip_terminal)
     end
 end
 
 function kld_resample!(b::AbstractParticleBelief, p::AdaOPSPlanner)
     sol = solver(p)
     k = 0
-    for s in particles(b)
-        k += access(sol.grid, p.access_cnt, s, p.pomdp)
+    for (s, i) in enumerate(particles(b))
+        if weight(b, i) > 0.0
+            k += access(sol.grid, p.access_cnt, s, p.pomdp)
+        end
     end
     m = clamp(ceil(Int, KLDSampleSize(k, sol.zeta)), sol.m_min, sol.m_max)
     resize!(p.resampled, m)
-    return resample!(p.resampled, b, p.pomdp, p.rng)
+    return resample!(p.resampled, b, p.rng)
 end
 
-function kld_resample!(b, p::AdaOPSPlanner)
+function kld_resample!(b, p::AdaOPSPlanner, strip_terminal::Bool)
     sol = solver(p)
     m_max = sol.m_max
     S_resampled = particles(p.resampled)
@@ -193,7 +206,7 @@ function kld_resample!(b, p::AdaOPSPlanner)
     while n < m
         for i in (n+1):m
             s = rand(rng, b)
-            while isterminal(p.pomdp, s)
+            while strip_terminal && isterminal(p.pomdp, s)
                 s = rand(rng, b)
             end
             S_resampled[i] = s
