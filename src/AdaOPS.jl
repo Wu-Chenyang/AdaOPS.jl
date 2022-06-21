@@ -88,6 +88,9 @@ Further information can be found in the field docstrings (e.g.
     "The minimum relative gap required for a branch to be expanded."
     xi::Float64                             = 0.95
 
+    "Resample before generating observations"
+    obs_resample::Bool                      = true
+
     "The δ-packing of beliefs will be generated."
     delta::Float64                          = 0.1
 
