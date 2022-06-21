@@ -11,6 +11,7 @@ using BeliefUpdaters
 using StaticArrays
 using POMDPPolicies
 using Plots
+ENV["GKSwstype"] = "100"
 theme(:mute)
 
 # include("baby_sanity_check.jl")
@@ -59,7 +60,7 @@ pomdp = LightDark1D()
 random = solve(RandomSolver(), pomdp)
 Base.convert(::Type{SVector{1,Float64}}, s::LightDark1DState) = SVector{1,Float64}(s.y)
 grid = StateGrid(range(-10, stop=15, length=26))
-bds = IndependentBounds(FORollout(random), pomdp.correct_r, check_terminal=true)
+bds = IndependentBounds(FORollout(random), pomdp.correct_r)
 solver = AdaOPSSolver(bounds=bds,
                     grid=grid,
                     m_min=30,
@@ -131,7 +132,7 @@ using POMDPs, POMDPModels, POMDPSimulators, AdaOPS
 
 pomdp = TigerPOMDP()
 
-solver = AdaOPSSolver(bounds=IndependentBounds(-20.0, 0.0, check_terminal=true))
+solver = AdaOPSSolver(bounds=IndependentBounds(-20.0, 0.0))
 planner = solve(solver, pomdp)
 
 for (s, a, o) in stepthrough(pomdp, planner, "s,a,o", max_steps=10)

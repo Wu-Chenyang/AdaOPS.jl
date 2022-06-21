@@ -81,7 +81,7 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
 
         if n_obs == 0
             D.ba_l[D.ba] = D.ba_r[D.ba]
-            D.ba_l[D.ba] = D.ba_r[D.ba]
+            D.ba_u[D.ba] = D.ba_r[D.ba]
             continue
         end
 
@@ -102,8 +102,8 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
         view(D.u, fbp:lbp) .= p.u
 
         # update upper and lower bounds for action selection
-        D.ba_l[D.ba] = D.ba_r[D.ba] + discount(p.pomdp) * sum((D.l[bp] * D.obs_prob[bp] for bp in D.ba_children[D.ba]), init=0.0)
-        D.ba_u[D.ba] = D.ba_r[D.ba] + discount(p.pomdp) * sum((D.u[bp] * D.obs_prob[bp] for bp in D.ba_children[D.ba]), init=0.0)
+        D.ba_l[D.ba] = D.ba_r[D.ba] + discount(p.pomdp) * sum(D.l[bp] * D.obs_prob[bp] for bp in D.ba_children[D.ba])
+        D.ba_u[D.ba] = D.ba_r[D.ba] + discount(p.pomdp) * sum(D.u[bp] * D.obs_prob[bp] for bp in D.ba_children[D.ba])
     end
     return maximum(D.ba_l[ba] for ba in D.children[b]) - D.l[b], maximum(D.ba_u[ba] for ba in D.children[b]) - D.u[b]
 end
@@ -162,7 +162,7 @@ function resample!(b::AbstractParticleBelief, p::AdaOPSPlanner{S,A,O,M,N}, strip
         # the number of resampled particles is default to p.sol.m_max
         return resample!(p.resampled, b, p.rng)
     else
-        return kld_resample!(b, p, strip_terminal)
+        return kld_resample!(b, p)
     end
 end
 
@@ -182,9 +182,10 @@ end
 
 function kld_resample!(b::AbstractParticleBelief, p::AdaOPSPlanner)
     sol = solver(p)
+    fill!(p.access_cnt, 0)
     k = 0
-    for (s, i) in enumerate(particles(b))
-        if weight(b, i) > 0.0
+    for (s, w) in weighted_particles(b)
+        if w > 0.0
             k += access(sol.grid, p.access_cnt, s, p.pomdp)
         end
     end
@@ -199,6 +200,7 @@ function kld_resample!(b, p::AdaOPSPlanner, strip_terminal::Bool)
     S_resampled = particles(p.resampled)
     resize!(S_resampled, m_max)
     rng = p.rng
+    fill!(p.access_cnt, 0)
 
     n = 0
     m = sol.m_min
