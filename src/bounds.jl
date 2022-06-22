@@ -360,3 +360,22 @@ function rollout(pomdp::POMDP{S}, policy::Policy, b::ParticleCollection{S}, step
     end
     return r_total
 end
+
+struct EntropyPenalizedEstimator{E} <: Solver
+    est::E
+    info_ratio::Float64
+end
+
+struct SolvedEntropyPenalizedEstimator{E} <: Policy
+    solved_est::E
+    info_ratio::Float64
+end
+
+function convert_estimator(est::EntropyPenalizedEstimator, sol::AdaOPSSolver, pomdp::POMDP)
+    solved_est = convert_estimator(est.est, sol, pomdp)
+    SolvedEntropyPenalizedEstimator(solved_est, est.info_ratio)
+end
+
+function bound(bd::SolvedEntropyPenalizedEstimator{E}, pomdp::M, b::WPFBelief{S}, max_depth::Int) where {E,S,M<:POMDP{S}}
+    return bound(bd.solved_est, pomdp, b, max_depth) - sqrt(bd.info_ratio * entropy(b))
+end

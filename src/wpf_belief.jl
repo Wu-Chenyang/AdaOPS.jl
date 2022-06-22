@@ -8,6 +8,19 @@ mutable struct WPFBelief{S, A, O} <: AbstractParticleBelief{S}
     _obs::O
     _probs::Union{Nothing, Dict{S,Float64}}
     _hist::Union{Nothing, Array{NamedTuple,1}}
+    function WPFBelief(P::Vector{S}, W, w_sum, b, depth, tree::AdaOPSTree{S,A,O}, _obs::O, _probs, _hist) where {S,A,O}
+        if _probs !== nothing
+            empty!(_probs)
+            for (i, s) in enumerate(P)
+                if haskey(_probs, s)
+                    _probs[s] += W[i] / w_sum
+                else
+                    _probs[s] = W[i] / w_sum
+                end
+            end
+        end
+        new{S,A,O}(P, W, w_sum, b, depth, tree, _obs, _probs, _hist)
+    end
 end
 
 WPFBelief(particles::Vector{S}, weights::Vector{Float64}, weight_sum::N, belief::Int, depth::Int, tree::AdaOPSTree{S,A,O}, obs::O) where {S,A,O,N<:Real} = WPFBelief{S,A,O}(particles, weights, convert(Float64, weight_sum), belief, depth, tree, obs, nothing, nothing)
@@ -97,7 +110,14 @@ function switch_to_sibling!(b::WPFBelief{S,A,O}, obs::O, weights::Array{Float64,
     b.weights = weights
     b.weight_sum = sum(weights)
     b._obs = obs
-    b._probs = nothing
+    if b._probs !== nothing
+        for s in keys(b._probs)
+            b._probs[s] = 0.0
+        end
+        for (i, s) in enumerate(particles(b))
+            b._probs[s] += weight(b, i) / b.weight_sum
+        end
+    end
     if b._hist !== nothing
         if length(b._hist) > 1
             b._hist[end] = (a=b._hist[end].a, o=obs)
@@ -111,11 +131,12 @@ function ParticleFilters.probdict(b::WPFBelief{S,A,O}) where {S,A,O}
     if b._probs === nothing
         # update the cache
         probs = Dict{S, Float64}()
+        w_sum = weight_sum(b)
         for (i,p) in enumerate(particles(b))
             if haskey(probs, p)
-                probs[p] += weight(b, i)/weight_sum(b)
+                probs[p] += weight(b, i) / w_sum
             else
-                probs[p] = weight(b, i)/weight_sum(b)
+                probs[p] = weight(b, i) / w_sum
             end
         end
         b._probs = probs
@@ -138,4 +159,13 @@ end
 
 function POMDPs.initialize_belief(up::BasicParticleFilter, b::WPFBelief{S}) where S
     ParticleFilters.resample(up.resampler, b, up.rng)
+end
+
+function entropy(dist)
+    ent = 0.0
+    for s in support(dist)
+        w = pdf(dist, s)
+        ent -= w > 0.0 ? w * log(w) : 0.0
+    end
+    return ent < 0.0 ? 0.0 : ent
 end

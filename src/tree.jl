@@ -61,12 +61,17 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
     ba_weights = resize!(D.weights[D.b + m_max * num_a + 1], n_particles(belief))
 
     D.children[b] = (D.ba+1):(D.ba+num_a)
+
+    empty!(p.prob_dict)
+    belief._probs = p.prob_dict
+    update_probs!(belief)
+    b_entropy = entropy(belief)
     for a in acts
         empty_buffer!(p)
         ba_weights .= weights(belief)
 
         S, O, R = propagate_particles!(D, belief, a, p, ba_weights)
-        gen_packing!(D, O, p, ba_weights)
+        b′_entropy = gen_packing!(D, S, O, p, ba_weights)
 
         D.ba += 1 # increase ba count
         n_obs = length(p.w) # number of new obs
@@ -76,7 +81,7 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
         # initialize the new action branch
         D.ba_children[D.ba] = fbp:lbp
         D.ba_parent[D.ba] = b
-        D.ba_r[D.ba] = R
+        D.ba_r[D.ba] = R + sol.info_ratio * (b_entropy - b′_entropy)
         D.ba_action[D.ba] = a
 
         if n_obs == 0
@@ -87,7 +92,7 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
 
         # initialize bounds
         D.b += n_obs
-        b′ = WPFBelief(S, first(p.w), 1.0, fbp, D.Delta[b] + 1, D, first(O))
+        b′ = WPFBelief(S, first(p.w), 1.0, fbp, D.Delta[b] + 1, D, first(O), p.prob_dict, nothing)
         resize!(p.u, n_obs)
         resize!(p.l, n_obs)
         bounds!(p.l, p.u, p.bounds, p.pomdp, b′, p.w, O, sol.max_depth, sol.bounds_warnings)
@@ -97,7 +102,7 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
         view(D.parent, fbp:lbp) .= D.ba
         view(D.Delta, fbp:lbp) .= D.Delta[b] + 1
         view(D.obs, fbp:lbp) .= O
-        view(D.obs_prob, fbp:lbp) .= p.obs_w ./ weight_sum(belief)
+        view(D.obs_prob, fbp:lbp) .= p.obs_w
         view(D.l, fbp:lbp) .= p.l
         view(D.u, fbp:lbp) .= p.u
 
@@ -134,6 +139,7 @@ function empty_buffer!(p::AdaOPSPlanner)
     empty!(p.obs_w)
     empty!(p.u)
     empty!(p.l)
+    empty!(p.prob_dict)
     return nothing
 end
 
@@ -250,18 +256,25 @@ function propagate_particles!(D::AdaOPSTree, belief::WeightedParticleBelief, a, 
             end
         end
     end
+    p.obs_w /= weight_sum(belief)
     return S, O, Rsum / weight_sum(belief)
 end
 
-function gen_packing!(D::AdaOPSTree, O, p::AdaOPSPlanner, ba_weights::Vector{Float64})
+function gen_packing!(D::AdaOPSTree, S, O, p::AdaOPSPlanner, ba_weights::Vector{Float64})
     sol = solver(p)
     m = length(ba_weights)
 
     next_obs = 1 # denote the index of the next observation branch
+    b′_entropy = 0.0
     for i in eachindex(O)
         w′ = resize!(D.weights[D.b+next_obs], m)
         o = O[i]
         reweight!(w′, ba_weights, o, p.obs_dists)
+
+        # calculate the entropy of the updated belief
+        b′ = update_probs!(WeightedParticleBelief(S, w′, 1.0, p.prob_dict))
+        b′_entropy += p.obs_w[i] * entropy(b′)
+
         # check if the observation is already covered by the packing
         obs_ind = in_packing(w′, p.w, sol.delta)
         if obs_ind != 0
@@ -280,7 +293,7 @@ function gen_packing!(D::AdaOPSTree, O, p::AdaOPSPlanner, ba_weights::Vector{Flo
     resize!(O, n_obs)
     resize!(p.obs_w, n_obs)
 
-    return nothing
+    return b′_entropy
 end
 
 function reweight!(w′::AbstractVector{Float64}, w::AbstractVector{Float64}, o, obs_dists)
@@ -342,4 +355,34 @@ function resize_ba!(D::AdaOPSTree{S}, n::Int) where S
         resize!(D.ba_action, n)
     end
     return nothing
+end
+
+function entropy(dist)
+    ent = 0.0
+    for s in support(dist)
+        w = pdf(dist, s)
+        ent -= w > 0.0 ? w * log(w) : 0.0
+    end
+    return ent < 0.0 ? 0.0 : ent
+end
+
+function update_probs!(b)
+    if b._probs === nothing
+        b._probs = Dict{S, Float64}()
+    else
+        for s in keys(b._probs)
+            b._probs[s] = 0.0
+        end
+    end
+    # update the cache
+    w_sum = weight_sum(b)
+    for (i,p) in enumerate(particles(b))
+        if haskey(b._probs, p)
+            b._probs[p] += weight(b, i) / w_sum
+        else
+            b._probs[p] = weight(b, i) / w_sum
+        end
+    end
+
+    return b
 end
