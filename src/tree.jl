@@ -87,7 +87,7 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
 
         # initialize bounds
         D.b += n_obs
-        b′ = WPFBelief(S, first(p.w), 1.0, fbp, D.Delta[b] + 1, D, first(O))
+        b′ = WPFBelief(S, first(p.w), 1.0, fbp, D.Delta[b] + 1, D, first(O), p.prob_dict, nothing)
         resize!(p.u, n_obs)
         resize!(p.l, n_obs)
         bounds!(p.l, p.u, p.bounds, p.pomdp, b′, p.w, O, sol.max_depth, sol.bounds_warnings)

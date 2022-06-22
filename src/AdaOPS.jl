@@ -45,6 +45,7 @@ export
     PORollout,
     SemiPORollout,
     RolloutEstimator,
+    EntropyPenalizedEstimator,
 
     StateGrid,
     KLDSampleSize,
@@ -192,6 +193,7 @@ mutable struct AdaOPSPlanner{S, A, O, P<:POMDP{S,A,O}, N, B, OD, RNG<:AbstractRN
     u::Vector{Float64}
     l::Vector{Float64}
     obs_dists::Vector{OD}
+    prob_dict::Dict{S, Float64}
     tree::Union{Nothing, AdaOPSTree{S,A,O}}
 end
 
@@ -209,7 +211,7 @@ function AdaOPSPlanner(sol::AdaOPSSolver{N}, pomdp::POMDP{S,A,O}) where {S,A,O,N
                         WeightedParticleBelief(sizehint!(Vector{S}(undef, m_max), m_max), sizehint!(ones(m_max), m_max), m_max), sizehint!(O[], m_max),
                         Dict{O, Int}(), sizehint!(Vector{Float64}[], m_max), access_cnt,
                         sizehint!(Float64[], m_max), sizehint!(Float64[], m_max), sizehint!(Float64[], m_max),
-                        obs_dists, nothing)
+                        obs_dists, Dict{S, Float64}(), nothing)
 end
 
 solver(p::AdaOPSPlanner) = p.sol
