@@ -60,7 +60,7 @@ pomdp = LightDark1D()
 random = solve(RandomSolver(), pomdp)
 Base.convert(::Type{SVector{1,Float64}}, s::LightDark1DState) = SVector{1,Float64}(s.y)
 grid = StateGrid(range(-10, stop=15, length=26))
-bds = IndependentBounds(FORollout(random), pomdp.correct_r)
+bds = IndependentBounds(FORollout(random), EntropyPenalizedEstimator(pomdp.correct_r, 0.03))
 solver = AdaOPSSolver(bounds=bds,
                     grid=grid,
                     m_min=30,
@@ -78,7 +78,8 @@ println("Discounted reward is $(discounted_reward(hist))")
 Base.convert(::Type{SVector{1,Float64}}, s::Bool) = SVector{1,Float64}(s)
 # Type stability
 pomdp = BabyPOMDP()
-bds = (pomdp, b)->(reward(pomdp, true, false)/(1-discount(pomdp)), 0.0)
+# bds = (pomdp, b)->(reward(pomdp, true, false)/(1-discount(pomdp)), 0.0)
+bds = IndependentBounds(reward(pomdp, true, false)/(1-discount(pomdp)), EntropyPenalizedEstimator(0.0, 0.01))
 solver = AdaOPSSolver(bounds=bds,
                       rng=MersenneTwister(4),
                       m_min=100,
@@ -101,7 +102,7 @@ info_analysis(info)
 pomdp = BabyPOMDP()
 
 # constant bounds
-bds = IndependentBounds(reward(pomdp, true, false)/(1-discount(pomdp)), 0.0)
+bds = IndependentBounds(reward(pomdp, true, false)/(1-discount(pomdp)), EntropyPenalizedEstimator(0.0, 0.01))
 solver = AdaOPSSolver(bounds=bds, m_min=200, tree_in_info=true, num_b=10_000)
 planner = solve(solver, pomdp)
 hr = HistoryRecorder(max_steps=20)
@@ -110,7 +111,7 @@ hist_analysis(hist)
 println("Discounted reward is $(discounted_reward(hist))")
 
 # SemiPORollout lower bound
-bds = IndependentBounds(SemiPORollout(FeedWhenCrying()), 0.0)
+bds = IndependentBounds(SemiPORollout(FeedWhenCrying()), EntropyPenalizedEstimator(0.0, 0.01))
 solver = AdaOPSSolver(bounds=bds, m_min=200, tree_in_info=true, num_b=10_000)
 planner = solve(solver, pomdp)
 hr = HistoryRecorder(max_steps=20)
@@ -119,7 +120,7 @@ hist_analysis(hist)
 println("Discounted reward is $(discounted_reward(hist))")
 
 # PO policy lower bound
-bds = IndependentBounds(PORollout(FeedWhenCrying(), PreviousObservationUpdater()), 0.0)
+bds = IndependentBounds(PORollout(FeedWhenCrying(), PreviousObservationUpdater()), EntropyPenalizedEstimator(0.0, 0.01))
 solver = AdaOPSSolver(bounds=bds, m_min=200, tree_in_info=true, num_b=10_000)
 planner = solve(solver, pomdp)
 hr = HistoryRecorder(max_steps=20)

@@ -66,7 +66,7 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
         ba_weights .= weights(belief)
 
         S, O, R = propagate_particles!(D, belief, a, p, ba_weights)
-        gen_packing!(D, O, belief, p, ba_weights)
+        gen_packing!(D, O, p, ba_weights)
 
         D.ba += 1 # increase ba count
         n_obs = length(p.w) # number of new obs
@@ -231,13 +231,14 @@ function propagate_particles!(D::AdaOPSTree, belief::WeightedParticleBelief, a, 
         if w == 0.0
             push!(S, s)
         else
-            sp, o, r = @gen(:sp, :o, :r)(p.pomdp, s, a, p.rng)
+            sp, r = @gen(:sp, :r)(p.pomdp, s, a, p.rng)
             Rsum += w * r
             push!(S, sp)
             if isterminal(p.pomdp, sp)
                 ba_weights[i] = 0.0
             else
                 p.obs_dists[i] = observation(p.pomdp, a, sp)
+                o = rand(p.rng, p.obs_dists[i])
                 obs_ind = get(p.obs_ind_dict, o, 0)
                 if obs_ind !== 0
                     p.obs_w[obs_ind] += w
@@ -249,12 +250,12 @@ function propagate_particles!(D::AdaOPSTree, belief::WeightedParticleBelief, a, 
             end
         end
     end
-    return S, O, Rsum/weight_sum(belief)
+    return S, O, Rsum / weight_sum(belief)
 end
 
-function gen_packing!(D::AdaOPSTree, O, belief::WeightedParticleBelief, p::AdaOPSPlanner, ba_weights::Vector{Float64})
+function gen_packing!(D::AdaOPSTree, O, p::AdaOPSPlanner, ba_weights::Vector{Float64})
     sol = solver(p)
-    m = n_particles(belief)
+    m = length(ba_weights)
 
     next_obs = 1 # denote the index of the next observation branch
     for i in eachindex(O)
@@ -262,7 +263,6 @@ function gen_packing!(D::AdaOPSTree, O, belief::WeightedParticleBelief, p::AdaOP
         o = O[i]
         reweight!(w′, ba_weights, o, p.obs_dists)
         # check if the observation is already covered by the packing
-        w′ .= w′ ./ sum(w′)
         obs_ind = in_packing(w′, p.w, sol.delta)
         if obs_ind != 0
             # merge the new obs into an existing obs
@@ -292,6 +292,7 @@ function reweight!(w′::AbstractVector{Float64}, w::AbstractVector{Float64}, o,
             w′[i] = w[i] * pdf(obs_dists[i], o)
         end
     end
+    w′ .= w′ ./ sum(w′)
 end
 
 function in_packing(w::Vector{Float64}, W::AbstractVector{Vector{Float64}}, δ::Float64)
