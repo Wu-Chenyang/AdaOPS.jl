@@ -76,7 +76,7 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
         # initialize the new action branch
         D.ba_children[D.ba] = fbp:lbp
         D.ba_parent[D.ba] = b
-        D.ba_r[D.ba] = R
+        D.ba_r[D.ba] = R - sol.ent_w * entropy(p.obs_w)
         D.ba_action[D.ba] = a
 
         if n_obs == 0
@@ -97,7 +97,7 @@ function expand!(D::AdaOPSTree, b::Int, p::AdaOPSPlanner)
         view(D.parent, fbp:lbp) .= D.ba
         view(D.Delta, fbp:lbp) .= D.Delta[b] + 1
         view(D.obs, fbp:lbp) .= O
-        view(D.obs_prob, fbp:lbp) .= p.obs_w ./ weight_sum(belief)
+        view(D.obs_prob, fbp:lbp) .= p.obs_w
         view(D.l, fbp:lbp) .= p.l
         view(D.u, fbp:lbp) .= p.u
 
@@ -250,6 +250,7 @@ function propagate_particles!(D::AdaOPSTree, belief::WeightedParticleBelief, a, 
             end
         end
     end
+    p.obs_w /= weight_sum(belief)
     return S, O, Rsum / weight_sum(belief)
 end
 
@@ -342,4 +343,15 @@ function resize_ba!(D::AdaOPSTree{S}, n::Int) where S
         resize!(D.ba_action, n)
     end
     return nothing
+end
+
+function entropy(v::AbstractVector{Float64})
+    remaining_w = 1.0
+    ent = 0.0
+    for w in v
+        remaining_w -= w
+        ent -= w * log(w)
+    end
+    ent -= remaining_w > 0.0 ? remaining_w * log(remaining_w) : 0.0
+    return ent
 end

@@ -113,6 +113,9 @@ Further information can be found in the field docstrings (e.g.
     "Resample when the design effect of a belief node exceed Deff_thres"
     Deff_thres::Float64                     = 2.0
 
+    "The weight of entropy which represents the preference for certainty"
+    ent_w::Float64                          = 0.1
+
     "The maximum depth of the belief tree."
     max_depth::Int                          = 90
 
